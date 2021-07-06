@@ -1,0 +1,704 @@
+---
+title: "Premier League 2019-2020 analysis"
+author: "Elisa Marson - Supervised Part"
+date: "7/06/2021"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+header-includes:
+- \usepackage{subfig}
+- \usepackage{bbm}
+urlcolor: blue
+---
+
+```{r, include=FALSE, message=FALSE, echo=FALSE}
+library(readr)
+library(summarytools)   #to visualize data
+library(dplyr)
+library(class)          #Knn
+library(caret)          
+library(rpart)          
+library(corrplot)       #correlation
+library(RColorBrewer)
+library(ggplot2)        #Plots
+library(gridExtra)
+library(tree)           #Tree
+library(randomForest)
+library(e1071)          #Bagging
+library(ipred)  
+```
+
+
+\begin{abstract}
+In the following paper a statistical analysis, in particular a multiclass classification, is performed to predict the outcome of the matches of the Premier League 2019-2020.
+
+To really test the predictive power of the method used (K-Nearest Neighbors and Decision Trees), a lot of variables related to the actual match played have been excluded, in particular the ones too correlated with the result outcome. On the other hand, variables related to the expectancies about the matches have been considered, since they are the ones on which the betting world is based. A part from these, it had been interesting to find out what are the other variables of second importance that can influence the result of a match.
+
+Consequently, dealing with a dataset about only one season and eliminated the most important variables, the ensemble methods turned out to be vital to increase the performances of the models.
+\end{abstract}
+
+\section{Data}
+
+First of all, the dataset (that can be retrieved at the following [link](https://www.kaggle.com/idoyo92/epl-stats-20192020)) is load and below a glimpse of it is shown. \ 
+
+
+```{r, include=FALSE, message=FALSE, echo=FALSE, warning= FALSE}
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+dataset <- read_csv("epl2020.csv")
+```
+```{r}
+head(dataset)
+```
+
+
+As we can see, the dataset has a lot variables that need to be dealt with and others that are not going to be useful at all. 
+
+
+\subsection{Data Preparation}
+
+Converted the categorical variables to factor and removed the not meaningful ones (like the three dummy about the result outcome, \textbf{wins}, \textbf{loses} and \textbf{draws}, and the \textbf{id}, \textbf{pts} and \textbf{date} one), the dataset is ready to be shown and inspected. 
+
+Because of its length, only the summary is shown, after the explanation off the variables. 
+
+
+```{r, echo=FALSE}
+dataset$h_a <- factor(dataset$h_a, levels = c("a", "h"), 
+                      labels = c("Away", "Home"))
+
+dataset$result <- factor(dataset$result, levels = c("d", "l", "w"), 
+                       labels = c("Draw", "Lose" ,"Win"))
+
+dataset$wins <- factor(dataset$wins)
+dataset$loses<- factor(dataset$loses)
+dataset$draws <- factor(dataset$draws)
+dataset$Referee.x <- factor(dataset$Referee.x)
+dataset$matchDay <- factor(dataset$matchDay)
+#dataset$matchtime <- factor(dataset$matchtime)
+
+# Remove not useful cols
+dataset$X1 = NULL
+
+dataset$wins = NULL
+dataset$draws = NULL
+dataset$loses = NULL
+
+dataset$pts = NULL
+dataset$date = NULL
+dataset$npxGD = NULL      #no explanation about this var
+```
+```{r}
+dim(dataset)
+```
+
+
+\begin{enumerate}
+\item \textbf{h\_a}: Home or Away team
+\item \textbf{xG}: xG index - expected goals
+\item \textbf{xGA}: xG index for opposite team
+\item \textbf{npxG}: non penalty xG - expected goals without penalties 
+\item \textbf{npxGA}: Same for the opposite team
+\item \textbf{deep}: Number of plays in opponent final third
+\item \textbf{deep\_allowed}: Number of plays allowed in final third
+\item \textbf{scored}: Goals scored 
+\item \textbf{missed}: Goals conceded
+\item \textbf{xpts}: Expected points
+\item \textbf{result}: [Draw, Lose, Win]
+\item \textbf{teamId}: Team name
+\item \textbf{ppda\_cal}: PPDA is a measure of pressing play
+\item \textbf{allowed\_ppda}:Same for the opposite team
+\item \textbf{matchtime}:The hour the match took place
+\item \textbf{tot\_points}: Total point the team managed so far
+\item \textbf{round}: Matchday number
+\item \textbf{tot\_goal}: Total goals team has scored so far
+\item \textbf{tot\_con}: Total goals team has conceded so far
+\item \textbf{Referee.x}: Referee name
+\item \textbf{HS.x}: Home team shots
+\item \textbf{HST.x}: Home shots on target
+\item \textbf{HF.x}: Home fouls
+\item \textbf{HC.x}: Home corners
+\item \textbf{HY.x}: Home yellow card
+\item \textbf{HR.x}: Home red cards
+\item \textbf{AS.x}: Away shots
+\item \textbf{AST.x}: Away shots on target
+\item \textbf{AF.x}: Away fouls
+\item \textbf{AC.x}: Away corners
+\item \textbf{AY.x}: Away yellow cards
+\item \textbf{AR.x}: Away red Cards
+\item \textbf{B365H.x}: B365 odd for Home win
+\item \textbf{B365D.x}: B365 odd for Draw
+\item \textbf{B365A.x}: B365 odd for Away win
+\item \textbf{HtrgPerc}:Shot on target\/total shots \- Home
+\item \textbf{AtrgPerc}: Same for the opposite team
+\item \textbf{matchDay}: The day of the week the match took place
+\end{enumerate}
+
+
+```{r}
+summary(dataset)
+```
+
+
+\subsection{Data Visualization}
+
+Given the large number of variables, some plots are shown below to better understand the dataset. \
+
+First of all we are going to better visualize the variable \textbf{xG}, the one that likely will have a large impact on our models.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+ggplot(dataset, aes(x=dataset$xG, color=dataset$h_a, fill=dataset$h_a)) +
+  geom_histogram(position="dodge", alpha=0.7)+
+  scale_color_manual(values=c("#ed536f", "#27e38e"))+
+  scale_fill_manual(values=c("#ed536f", "#27e38e"))
+
+```
+
+The values of \textbf{xG} seemed to be balanced between home and away team, being just bit more in favor of the home one as could be expected. \
+
+\newpage
+
+The following boxplots show the correlation between the variables \textbf{scored} and \textbf{missed} and the \textbf{result} variable, that is going to be predicted.
+
+```{r echo=FALSE}
+# Boxplots 
+grid.arrange(ggplot(dataset, aes(x=result ,y=scored)) +
+              geom_boxplot(fill= "#FDE725FF", alpha= 0.7), 
+            ggplot(dataset, aes(x=result, y=missed))+
+              geom_boxplot(fill= "#2D708EFF", alpha= 0.7), 
+            ncol=2)
+```
+
+It is clear that there are no overlaps between the boxes: there is strong correlation between them and the outcome of the matches, that is why it had to be necessary to remove them.
+
+```{r echo=FALSE}
+dataset$scored = NULL
+dataset$missed = NULL
+```
+
+
+```{r echo=FALSE}
+grid.arrange(ggplot(dataset, aes(x=result ,y=xG)) +
+              geom_boxplot(fill= "#0e78c4", alpha= 0.7), 
+            ggplot(dataset, aes(x=result, y=xpts))+
+              geom_boxplot(fill= "#04d19e", alpha= 0.7),
+            ggplot(dataset, aes(x=result ,y=npxG)) +
+              geom_boxplot(fill= "#f2070f", alpha= 0.7), 
+            ggplot(dataset, aes(x=result, y=deep))+
+              geom_boxplot(fill= "#eb961e", alpha= 0.7),
+            ncol=2)
+```
+With the plots above we can check the variables related to the expectancies about a match and also the deep variable. \
+From them, it appears that the one more correlated with the outcome is \textbf{xpts} (expected points); later its problematicness will be confirmed also by the correlation matrix.
+
+\newpage
+
+\section{Correlation}
+
+Since it was already clear from the plots that correlation between variables can be a potential issue, below a correlation plot is shown.
+
+```{r echo=FALSE}
+M <-cor(Filter(is.numeric, dataset))
+corrplot(M, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdBu"), tl.cex = 0.6)
+
+```
+
+To deal with the high correlation between variables, the following ones have been removed:
+
+\begin{itemize}
+\item \textbf{xGA}
+\item \textbf{npxGA}
+\item \textbf{round}
+\item \textbf{xpts}
+\item \textbf{npxG}
+\item \textbf{tot\_goal}
+\end{itemize}
+
+
+The correlation matrix is now plotted again.
+
+```{r echo=FALSE}
+data_nocorr <- dataset
+
+data_nocorr$teamId = NULL
+
+# Remove too correlated variable 
+data_nocorr$xGA = NULL
+data_nocorr$npxGA = NULL
+data_nocorr$round = NULL
+
+data_nocorr$xpts = NULL
+data_nocorr$npxG = NULL
+
+data_nocorr$tot_goal = NULL
+
+# Tried to removed but better performances with them
+#data_nocorr$AST.x = NULL
+#data_nocorr$B365A.x = NULL
+
+```
+
+
+```{r echo=FALSE}
+M <-cor(Filter(is.numeric, data_nocorr))
+
+# ... : further arguments to pass to the native R cor.test function
+cor.mtest <- function(mat, ...) {
+    mat <- as.matrix(mat)
+    n <- ncol(mat)
+    p.mat<- matrix(NA, n, n)
+    diag(p.mat) <- 0
+    for (i in 1:(n - 1)) {
+        for (j in (i + 1):n) {
+            tmp <- cor.test(mat[, i], mat[, j], ...)
+            p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+        }
+    }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  p.mat
+}
+
+# matrix of the p-value of the correlation
+p.mat <- cor.mtest(Filter(is.numeric, data_nocorr))
+
+corrplot(M, method="color", type="upper", order="hclust", 
+         addCoef.col = "black",
+         col=brewer.pal(n=8, name="RdYlBu"), tl.cex = 0.6,
+         p.mat = p.mat, insig = "blank", number.cex = 0.5,
+         diag=FALSE 
+         )
+```
+
+Correlation between some variables is still present, but it is to be expected due the nature of the dataset.
+
+
+\newpage
+
+\section{KNN Algorithm}
+
+Now that we have carefully chosen the variables to use in our models, it is time to start implementing the first methods, the KNN algorithm. \
+To begin, we have to normalize our data and so exclude the categorical variables.
+
+```{r echo=FALSE}
+# put outcome in its own object
+result_outcome <- data_nocorr %>% select(result)
+
+# Normalize 
+data_knn<- scale(Filter(is.numeric, data_nocorr))
+summary(data_knn)
+```
+
+
+```{r echo=FALSE}
+# Split in train and test 
+set.seed(27)
+
+#random selection of 70% data.
+dat.d <- sample(1:nrow(data_knn),size=nrow(data_knn)*0.7,replace = FALSE) 
+ 
+train <- data_knn[dat.d,]
+test <- data_knn[-dat.d,]
+
+#Creating seperate dataframe for 'Result' feature which is our target.
+train_labels <- result_outcome[dat.d,]
+test_labels <- result_outcome[-dat.d,]
+
+train <- cbind(train, train_labels)
+test <- cbind(test, test_labels)
+```
+
+
+After splitting the dataset in train and test, the method KNN is called. \
+At this first step, the parameter k is chosen as the square root of the number of observation (24); we are going now to check its performances through the help of a correlation matrix.
+
+```{r echo=FALSE}
+knn_24 = knn3(result ~ ., data = train, k = 24)
+
+pred_trn = predict(knn_24, test, type = "class")
+
+confusionMatrix(pred_trn, test$result)
+```
+
+Accuracy is not very good in this first attempt.\
+Another thing to point out is that overall, between the three classes to predict, specificity is higher than sensibility: the model is better at predicting a negative response.
+
+
+\subsection{Tuning}
+
+We are now going to tune the model, training the data with various KNN algorithm. To do this, we are going to use \textbf{Repeated Cross-Validation}, with 10 folds and 3 repeats; the accuracy of these algorithms is plotted below. 
+
+```{r include=FALSE}
+# Knn with caret pack, https://dataaspirant.com/knn-implementation-r-using-caret-package/
+
+trctrl <- trainControl(method = "repeatedcv", 
+                       number = 10, 
+                       repeats = 3)
+
+set.seed(27)
+knn_fit <- train(result ~., data = train, method = "knn",
+ trControl=trctrl,
+ preProcess = c("center", "scale"),
+ tuneLength = 40)
+
+knn_fit
+```
+
+```{r echo=FALSE}
+plot(knn_fit)
+```
+
+With these parameter, we are able to reach an accuracy of 0.58 with k = 77 on the training set; below the performances on the test set.
+
+```{r echo=FALSE}
+test_pred <- predict(knn_fit, test)
+
+confusionMatrix(test_pred, test$result)
+```
+
+Accuracy has improved, but not significantly. \
+Also the other measures didn't change that much, considering that we are taking into account more than the double of neighbors with respect to the previous model. \
+
+
+In summary, KNN algorithm can reach an accuracy close to 50% with an higher specificity, meaning it is more able to predict the actual negative value. Moreover, from this algorithm we can't retrieve the importance of single variables on the overall model. \
+Anyway, all thing considered, KNN has been a good starting point, being able to predict half of the matches outcome correctly: from this on we expect to only improve our statistics and retrieve more information about the variables used, through the help of more sophisticated methods. 
+
+\newpage
+
+\section{Decision Trees}
+
+The next model we are going to use on our multiclass classification problem is decision tree. \
+One of the advantages to point out is that now \textbf{categorical variables} can be considered. In addition to that, we will obtain information about the variables actually used and, last but not least, we will be able to better visualize our model.
+
+```{r echo=FALSE}
+# Clean global environment 
+rm(list = ls()[!ls() %in% c("dataset", "data_nocorr")])
+
+# Split in train and test 
+set.seed(27)
+train <- sample(1:nrow(data_nocorr),size=nrow(data_nocorr)*0.7,replace = FALSE) 
+ 
+```
+```{r echo=FALSE}
+tree1=tree(result~., data=data_nocorr, subset = train)
+summary(tree1)
+```
+
+The first thing we are going to analyse are the variables that give us the best split: the first three can be expected. \
+As we already stated before, \textbf{xG} was expected to be one of most relevant one and in this tree is actually the first considered. It is followed by the shots on target for the home and away team (\textbf{HST.x} and \textbf{AST.x}), and also the reason behind this is very intuitive. \
+What is unexpected is the variable considered for the fourth split: \textbf{Referee.x}, a categorical one that our previous algorithm couldn't evaluate. It is curious how much influence, according to this model, the referee can have on the outcome of a match, more than other classical factors, like the number of plays in the final third (deep), or the number of fouls, corners or yellow and red cards; it is even determinant with respect to the odds of the british online betting company Bet365.
+
+Below the plot and statistics about the tree are shown.
+
+```{r echo=FALSE}
+plot(tree1)
+text(tree1, all=TRUE, cex=.8)
+```
+
+
+```{r echo=FALSE}
+tree1_pred= predict(tree1, data_nocorr[-train,], type="class")
+
+confusionMatrix(tree1_pred, data_nocorr[-train,]$result)
+```
+
+A simple tree as this one is already performing slightly better than the KNN algorithm: accuracy is improved (even though is still not brilliant) and the tree is a bit better at predicting positive result. For the class \textbf{Win} sensitivity is higher than specificity.
+
+Anyway we let the tree grown to full depth: it might be too variable. For this reason, we are going to use Cross Validation to prune it.
+
+```{r include=FALSE}
+#set.seed(27)
+#cv_tree1= cv.tree(tree1, FUN=prune.misclass)
+
+#save(cv_tree1, file="cv_tree1.RData")
+
+load("cv_tree1.RData")
+
+cv_tree1
+```
+```{r echo=FALSE}
+plot(cv_tree1)
+```
+
+As we can see from the plot above, we can prune to consider, for example, only 4 varibles. The pruned tree and its statistics are shown below.
+
+```{r echo=FALSE}
+pruned_tree1= prune.misclass(tree1, best=4)
+plot(pruned_tree1)
+text(pruned_tree1, all=TRUE, cex=.8)
+```
+
+```{r echo=FALSE}
+tree.pred2=predict(pruned_tree1, data_nocorr[-train,], type="class")
+
+cm0 <- confusionMatrix(tree.pred2, data_nocorr[-train,]$result)
+cm0
+```
+
+Pruning the tree improved a bit its performances. This gives us hope that, combining more trees with ensemble methods, we can obtain even better results.
+
+
+
+\subsection{Bagging}
+
+Since the decision trees suffers from high variance, the first ensemble methods we are going to try is Bagging, since it is a technique used to reduce the variance of the predictions by combining the result of multiple classifiers modeled on different sub-samples of the same dataset.
+
+```{r echo=FALSE}
+# Clean global environment 
+rm(list = ls()[!ls() %in% c("dataset", "data_nocorr", "train", "cm0")])
+
+```
+```{r echo=FALSE}
+#set.seed(27)
+#train=sample(1:nrow(data_nocorr),403)
+
+# https://www.statology.org/bagging-in-r/
+
+#bag <- bagging(
+#  formula = result ~ .,
+#  data = data_nocorr,
+#  subset = train, 
+#  nbagg = 150,   
+#  coob = TRUE,
+#  control = rpart.control(minsplit = 2, cp = 0))
+#
+#save(bag, file="bag.RData")
+
+load("bag.RData")
+
+bag
+```
+
+We choose to use 150 bootstrapped samples to build the bagged model; we specified to use 2 observation in a node to split and we set the complexity parameter to 0, ie we don’t require the model to be able to improve the overall fit by any amount in order to perform a split. \
+These two arguments allow the individual trees to grow extremely deep, which leads to trees with high variance but low bias. Then, applying bagging, we are able to reduce the variance of the final model while keeping the bias low.
+
+```{r echo=FALSE}
+pred_bag <- predict(bag, data_nocorr[-train,])
+cm1 <- confusionMatrix(pred_bag, data_nocorr[-train,]$result)
+cm1
+```
+
+Accuracy has actually improved (0.54), meaning that ensemble methods could be an answer to our problem. We obtained good result also regarding sensitivity and specificity, with the latter always higher.\
+
+Below we plotted the importance of the variables.
+
+```{r echo=FALSE}
+## Visualize variable importance with horizontal bar plot
+#im <- varImp(bag)
+#save(im, file="im.RData")
+
+load("im.RData")
+VI <- data.frame(var=names(data_nocorr[-5]), imp=im)
+
+VI_plot <- VI[order(VI$Overall, decreasing=TRUE),]
+
+VI_top10 <- VI_plot[1:10, ]
+
+barplot(VI_top10$Overall,
+        names.arg=rownames(VI_top10),
+        horiz=TRUE, las=1, cex.names=0.8,
+        col='#45de9c',
+        xlab='Variable Importance')
+```
+
+As expcted \textbf{xG} is still the most important variable, but it is surprising to find at the second place the \textbf{Referee.x} one.\
+Moreover we can notice that the variables about shots on target used in the previous tree (\textbf{HST.x} and \textbf{AST.x}) here are not present; they have been replaced by the ones about \textbf{ppda} and \textbf{deep\_allowed}. We could say that the bagging method is considering more the teams' style of playing to predict the result of the match.
+
+\newpage
+
+\subsection{Random Forest}
+
+```{r echo=FALSE}
+# Clean global environment 
+rm(list = ls()[!ls() %in% c("dataset", "data_nocorr", "train", "cm0", "cm1")])
+
+```
+
+The second ensemble method we will use is random forest, which is giving us an improvement over bagged trees by a small tweak that decorrelates the trees: when building these decision trees, each time a split in a tree is considered, a random sample of m predictors is chosen as split candidates from the full set of p predictors. \
+
+First we are going to implement the grid search approach using again the \textbf{Repeated Cross validation} to choose the best parameters for our random forest.
+
+```{r include=FALSE}
+# Tuning parameter
+
+#control <- trainControl(method="repeatedcv", number=10, repeats=3, search="grid")
+#tunegrid <- expand.grid(.mtry=c(1:15))
+#metric <- "Accuracy"
+#
+#set.seed(27)
+#rf_gridsearch <- train(result~., 
+#                       data=data_nocorr,
+#                       subset = train,
+#                       method="rf", 
+#                       metric=metric, 
+#                       tuneGrid=tunegrid, 
+#                       trControl=control)
+#
+#save(rf_gridsearch, file="rf_gridsearch.RData")
+
+load("rf_gridsearch.RData")
+
+print(rf_gridsearch)
+```
+```{r echo=FALSE}
+plot(rf_gridsearch)
+```
+
+As we can see from the plot above, we reached the maximum accuracy (0.61) considering 9 predictors at each split. So we are going to implement our random forest with mtry=9.
+
+```{r echo=FALSE}
+set.seed(888)
+rfg <- randomForest(result ~ ., data = data_nocorr, subset = train,
+                      importance = TRUE,
+                      mtry = 9)
+
+
+rfg_pred= predict(rfg, data_nocorr[-train,])
+
+cm2 <- confusionMatrix(rfg_pred, data_nocorr[-train,]$result)
+cm2
+```
+
+Accuracy is almost the same as bagging, if not a bit lower, and also the other statistics overall don't differ too much. Stands out only specificity for the draw class is very high (0.94). Below the importance of the variables is plotted.
+
+
+```{r include=FALSE}
+# plot variables importance
+imp <- varImpPlot(rfg)
+
+imp <- as.data.frame(imp)
+imp$varnames <- rownames(imp) # row names to column
+rownames(imp) <- NULL  
+imp$var_categ <- ifelse(imp$varnames == "h_a" |imp$varnames == "Referee.x" 
+                        | imp$varnames == "matchDay", "Factor", "Numeric")
+```
+```{r echo=FALSE}
+## IncNodePurity is the total decrease in node impurities, measured by the Gini Index from splitting on the variable, averaged over all trees
+
+ggplot(imp, aes(x=reorder(varnames, MeanDecreaseGini), y=MeanDecreaseGini, color=as.factor(var_categ))) + 
+  geom_point() +
+  geom_segment(aes(x=varnames,xend=varnames,y=0,yend=MeanDecreaseGini)) +
+  scale_color_discrete(name="Variable Group") +
+  ylab("IncNodePurity") +
+  xlab("Variable Name") +
+  coord_flip()
+```
+
+The first variables chosen by the random forest are the same as the one chosen by bagging, but \textbf{tot\_con} and \textbf{tot\_points} have gained more importance. This means that this model is taking more into account the characteristics about the team previous to the match and not variables about the performances in the match itself.
+
+\subsection{Boosting} 
+
+As last ensemble method, we are going to perform Boosting. The difference with the previous one is that in boosting the trees are grown sequentially: each tree is grown using information from previously grown trees. \
+Moreover, boosting does not involve bootstrap sampling; instead, each tree is fitted on a modified version of the original dataset. \
+
+First we are going to implement boosting with its default parameters; its correltion matrix is shown below.
+
+```{r echo=FALSE}
+set.seed(27)
+boost <- train(result ~ ., 
+               method = "gbm", 
+               data = data_nocorr,
+               subset = train,
+               verbose = F,
+               preProc = "zv",
+               trControl = trainControl(method = "cv", number = 3))
+
+# out-of-sample errors using validation dataset 
+pred_boost <- predict(boost, data_nocorr[-train,])
+cm3 <- confusionMatrix(pred_boost, data_nocorr[-train,]$result)
+cm3
+```
+
+Its statistics are not so different from the ones of the previous models. \
+
+Anyway, with boosting we have different parameters that can be tuned: number of trees, the interaction depth and shrinkage. We again are going to use the grid search method combined with the usual Repeated Cross Validation with 10 folds and 3 repeats. 
+
+```{r echo=FALSE}
+##model tuning 
+#man_grid <- expand.grid(n.trees = c(100:300),
+#                        interaction.depth = c(4, 6, 8),
+#                        shrinkage = 0.1,
+#                        n.minobsinnode = 10)
+#
+#trctrl <- trainControl(method = "repeatedcv", 
+#                       number = 10, 
+#                       repeats = 3)
+#
+#set.seed(27)
+#gmbFit<- train(result ~ ., 
+#              method = "gbm", 
+#              data = data_nocorr,
+#              subset = train,
+#              verbose = F, 
+#              preProc = "zv",
+#              trControl = trctrl, 
+#              bag.fraction = 0.5,
+#              tuneGrid = man_grid)
+#
+#save(gmbFit, file="gmbFit.RData")
+
+load("gmbFit.RData")
+
+ggplot(gmbFit)
+```
+
+From the above plot we can see that thee combination of parameters that give us the best accuracy is 140 number of trees and an interaction depth of 6.
+
+
+```{r echo=FALSE}
+plot(gmbFit, metric = "Kappa", plotType = "level")
+```
+
+We also plotted the changes in the coefficient Kappa: again our previuos parameter are confirmed to be the best possible. We can proceed test the predictions of our tuned boosting model.
+
+```{r include=FALSE}
+gmbFit
+#The final values used for the model were n.trees = 140, interaction.depth = 6, shrinkage =
+# 0.1 and n.minobsinnode = 10.
+```
+
+
+```{r echo=FALSE}
+gmb_pred= predict(gmbFit, data_nocorr[-train,])
+
+cm3 <- confusionMatrix(gmb_pred, data_nocorr[-train,]$result)
+cm3
+```
+
+Finally the accuracy had a significant improvement, reaching 0.62. Sensitivity and specificity are also better with respect to the non tuned boosting model, even though they are not that different from the ones of Bagging and Random Forest, just slightly better overall.
+
+\section{Conclusion}
+
+Below a summary of the accuracy obtained with the decision trees:
+
+```{r echo=FALSE}
+re <- data.frame(Tree=cm0$overall[1], 
+                    Bagging=cm1$overall[1], 
+                    Random_Forest=cm2$overall[1],
+                    Boosting=cm3$overall[1])
+re
+```
+
+In our case the model that performs better is boosting: keeping in mind that its characteristic is to learn sequentially, we have taken from it the advantage of reducing the bias in our model, without loosing completely the reduction of variance we obtained with bagging, but that was not enough alone. \
+
+In absolute term, the accuracy we obtained is of course not among the best; but we have to take into consideration the topic we are dealing with. The appealing aspects of soccer are due to its unpredictability, that is given by a very large number of random events. \
+Moreover, we have to consider that soccer is one of the best examples of team work. Even though the success of a team is ordinarily defined in terms of its wins and losses, these are the results of complex and intriguing interactions between the performances of individual players of the two teams and also the uncertainties pertinent to the situation. One might even say that these interactions and uncertainties in the nature of this game make soccer so popular. \
+
+That is why obtaining high accuracy is very difficult, even for the experts: according to this [article](https://empirics.asia/how-i-used-machine-learning-to-predict-football-games-for-24-months-straight/) the market of sports bets is able to predict roughly 70% of the matches correctly. So, being aware that our model can surely be improved, we can be quite satisfied with accuracy at 0.62 in this first attempt.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

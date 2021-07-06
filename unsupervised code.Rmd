@@ -1,0 +1,401 @@
+---
+title: "PL Players 2019-2020 clustering"
+author: "Elisa Marson - Unsupervised Part"
+date: "7/06/2021"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+header-includes:
+- \usepackage{subfig}
+- \usepackage{bbm}
+urlcolor: blue
+---
+
+
+```{r, include=FALSE, message=FALSE, echo=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)        #Plots
+library(gridExtra)
+library(cluster)
+library(factoextra)
+library(purrr)          #agnes
+```
+
+\begin{abstract}
+In the following paper we are going to searching for subgroups between soccer players of Premier Leaugue 2019-2020, using a dataset from Fifa. \
+The goal is to test whether the players are going to be divided only beacause of their roles or if other characteristics will be taken into account.
+\end{abstract}
+
+\section{Data}
+
+First of all, the dataset (that can be retrieved at the following [link](https://www.kaggle.com/stefanoleone992/fifa-20-complete-player-dataset)) is load and below its dimension are shown.
+
+```{r include=FALSE, message=FALSE, echo=FALSE, warning= FALSE}
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+
+dataset <- read_csv("players_20.csv")
+```
+```{r}
+dim(dataset)
+```
+
+\subsection{Data Preparation}
+
+Since it is a huge dataset, we need to retrieve only the data in which we are interested. \
+We are going to select only the players of the most famous English soccer clubs, listed below:
+
+\begin{enumerate}
+\item \textbf{Manchester City}
+\item \textbf{Manchester United}
+\item \textbf{Liverpool}
+\item \textbf{Arsenal}
+\item \textbf{Chelsea}
+\end{enumerate}
+
+```{r echo=FALSE}
+dataset$nationality <- factor(dataset$nationality)
+dataset$team_position <- factor(dataset$team_position)
+dataset$preferred_foot <- factor(dataset$preferred_foot)
+dataset$club <- factor(dataset$club)
+
+# Only famous PL
+df <- dataset %>% filter(club %in% c("Manchester City", "Liverpool", "Manchester United",
+                                       "Chelsea", "Arsenal"))
+
+df <- df[ -c(1, 2, 4, 6:8, 13, 15, 17:19, 20:24, 26:31, 37:104) ]
+
+df$potential = NULL
+```
+```{r}
+head(df)
+```
+
+Below a description of the variables selected for this analysis:
+
+\begin{enumerate}
+\item \textbf{short\_name}: short name of the player
+\item \textbf{age}
+\item \textbf{nationality}
+\item \textbf{club}
+\item \textbf{overall}: overall attribute 
+\item \textbf{wage\_eur}: wage in EUR of the player
+\item \textbf{preferred\_foot}: [Left, Right]
+\item \textbf{team\_position}: player position in the team
+\item \textbf{pace}: player's speed in walking and running
+\item \textbf{shooting}
+\item \textbf{passing}
+\item \textbf{dribbling}
+\item \textbf{defending}
+\end{enumerate}
+
+
+\subsection{Data Visualization}
+
+We are going to start exploring our dataset through some visualization. \
+
+First we divide our player in 4 age groups and use some boxplots to see if we can already find subgroups based on the age. Below maximum and minimum age are printed.
+
+```{r echo=FALSE}
+# Age Boxplots
+
+# Create age groups
+max(df$age)
+min(df$age)
+
+labs <- c(paste(seq(17, 34, by = 5), seq(17 + 5 - 1, 39, by = 5), 
+                sep = "-"))
+
+df$AgeGroup <- cut(df$age, breaks = c(seq(17, 34, by = 5), Inf), 
+                       labels = labs, right = FALSE)
+
+par(mfrow=c(1,2))
+boxplot(`overall`~AgeGroup, data=df, las=2, col="#FF99CC")
+boxplot(`wage_eur`~AgeGroup, data=df, las=2, col="#33CC66")
+```
+
+From these it is clear that the \textbf{youngest} have a lower overall score and lower wage, as could be expected. On the other hand, there are not such big differences regarding the other age groups.
+
+```{r, include=FALSE}
+# Remove the age groups
+df$AgeGroup <- NULL
+```
+```{r echo=FALSE, message=FALSE}
+p<-ggplot(df, aes(x=overall)) + 
+  geom_histogram(color="black", fill="#1400c7")
+
+p + annotate("rect", xmin = 48, xmax = 70, ymin = 0, ymax = 25, alpha = .1,fill = "blue") +
+  annotate("rect", xmin = 70, xmax = 85, ymin = 0, ymax = 25, alpha = .1,fill = "red") +
+  annotate("rect", xmin = 85, xmax = 95, ymin = 0, ymax = 25, alpha = .1,fill = "green")
+```
+
+Above we plotted the distribution of the variable \textbf{overall}. We can identify 3 subgroups:
+
+\begin{itemize}
+\item \textbf{Low Overall}: 48-70 score
+\item \textbf{Medium Overall}: 70-85 score
+\item \textbf{High Overall}: 85-95 score
+\end{itemize}
+
+
+```{r echo=FALSE}
+par(mfrow=c(1,2))
+boxplot(`shooting`~preferred_foot, data=df, col="#00c7a9")
+boxplot(`dribbling`~preferred_foot, data=df, col="#d100ab")
+```
+
+Next, we plotted boxplots to see if we could find subgroups based on the \textbf{preferred\_foot} of the players, but not a clear one could be found.
+
+
+\subsection{Data Cleaning} 
+
+Before proceeding with the real analysis, we checked the presence of NAs in our dataset inspecting the columns.
+
+```{r echo=FALSE}
+apply(df, 2, function(x) any(is.na(x)))
+```
+
+There are some rows with NAs, so proceeded to remove them. It won't be much of a problem, since we still have more than enough players for this kind of analysis.
+
+```{r echo=FALSE}
+df <- df[rowSums(is.na(df)) == 0, ]
+
+apply(df, 2, function(x) any(is.na(x)))
+```
+
+After removing the NAs, this is the dimension of our dataset:
+```{r}
+dim(df)
+```
+
+
+\section{K-Means Algorithm}
+
+We start our analysis by applying the K-Means algorithm. To do so, we have first to take in consideration only the numerical variable and normalize them.
+
+```{r echo=FALSE}
+df_num <- scale(Filter(is.numeric, df))
+summary(df_num)
+```
+
+Now that our variables are ready, we start looking for the best value of K using the elbow method.
+
+```{r echo=FALSE}
+set.seed(27)
+k.max<-10 
+
+wss<-sapply(1:k.max,function(k){kmeans(df_num,k,nstart=50,iter.max=15)$tot.withinss})
+
+plot(1:k.max,wss,type="b",pch=19,xlab="Number of groups",ylab="Within Deviation",col="blue") 
+```
+
+From the plot above it clear that the best value of K is 4. \
+Below the K-Means Clustering with k=4 is implemented; its dimension and a plot of the clusters is shown.
+
+
+```{r echo=FALSE}
+set.seed(27)
+k4 <- kmeans(df_num, 4)
+k4$size
+
+fviz_cluster(k4, data = df_num)
+```
+
+As we can see from it, the four clusters seems to be pretty well divided with no overlappings between them. Below we show the means of the variable for each cluster.
+
+```{r echo=FALSE}
+set.seed(27)
+aggregate(df_num, by=list(cluster=k4$cluster), mean)
+```
+
+Description of the characterics of each group:
+
+\begin{itemize}
+\item \textbf{Cluster 1}: composed by young player, probably midfielder since they have good values in almost all the features.
+\item \textbf{Cluster 2}: composed by defeners, since the defending variable is really high but they have the worst value for pace. They are also the oldest.
+\item \textbf{Cluster 3}: composed by the youngest players that still didn't show off, since all their values are negatve.
+\item \textbf{Cluster 4}: composed by the strongest forwards. Their only negative value is in the defending variable; they have also the highest wages.
+\end{itemize}
+
+We are now going to check our assumption on the composition of the clusters with some insights on these group.
+
+
+```{r echo=FALSE}
+df$cluster = k4$cluster
+cluster1 <- filter(df, cluster == 1)
+```
+```{r}
+cluster1$short_name
+```
+
+Cluster 1 is composed by young player with mixed roles: we can find for example \textbf{Robertson} (left back), \textbf{N. Keïta} (central midfield), \textbf{Pulisic} (forward) and \textbf{Emerson} (defensor / left back).
+
+
+```{r echo=FALSE}
+cluster2 <- filter(df, cluster == 2)
+```
+```{r}
+cluster2$short_name
+```
+
+Cluster 2 is actually composed by famous defenders, like \textbf{Van Dijk}, \textbf{Laporte} and \textbf{Lindelöf}. Stands out the misclassification of the French forward \textbf{Giroud}, but it is actually understandable given his style of playing.
+
+
+```{r echo=FALSE}
+cluster3 <- filter(df, cluster == 3)
+```
+```{r}
+cluster3$short_name
+```
+
+
+```{r echo=FALSE}
+cluster4 <- filter(df, cluster == 4)
+```
+```{r}
+cluster4$short_name
+```
+
+Cluster 4 is composed by the most famous players of the Premier Leaugue, like \textbf{De Bruyne}, \textbf{Salah}, \textbf{Pogba}, \textbf{Sterlign}, all of them forwards.
+
+
+```{r echo=FALSE}
+grid.arrange(ggplot(cluster1, aes(x=team_position)) +
+               geom_bar(fill="#f55d58")+
+               ggtitle("Cluster 1"),
+            ggplot(cluster2, aes(x=team_position)) +
+               geom_bar(fill="#84f573")+
+              ggtitle("Cluster 2"),
+            ggplot(cluster3, aes(x=team_position)) +
+               geom_bar(fill="#76e8f5")+
+              ggtitle("Cluster 3"),
+            ggplot(cluster4, aes(x=team_position)) +
+               geom_bar(fill="#fa78f1")+
+              ggtitle("Cluster 4"),
+            ncol=2)
+
+```
+
+Above we plotted the clusters to underline differences between them based on \textbf{team\_position}. It is crystal clear the difference of cluster 3, less for the others. This could be because, as we hypothesized before, this cluster is composed by the youngest players, whose position in the team is still not well defined.
+
+\newpage
+
+\section{Dendrograms}
+
+Next we are going to check the goodness of our clusters, trying to build dendrograms with different methods. To build them, we are going to use the \textbf{Gower's Distance}, that works also for the categorical variables. \
+
+
+To choose which methods to apply, we are going to use the agnes function, from which we can retrieve the agglomerative coefficient, which measures the amount of clustering structure found.
+
+```{r echo=FALSE}
+# vector of methods to compare
+m <- c( "average", "single", "complete", "ward")
+names(m) <- c( "average", "single", "complete", "ward")
+
+ac <- function(x) {
+  agnes(df[, -1], method = x)$ac
+}
+map_dbl(m, ac)
+```
+
+Given these coefficients, we are going to use the \textbf{Complete} and \textbf{Ward} methods.
+
+```{r echo=FALSE}
+df_dist <- daisy(df[, -1], metric="gower")
+
+hc1<-hclust(df_dist, method="complete")
+plot(hc1, main="Complete Method") 
+rect.hclust(hc1,k=4,border=c("red","green","blue"))
+
+hc2<-hclust(df_dist, method="ward.D2")
+plot(hc2, main="Ward Method") 
+rect.hclust(hc2,k=8,border=c("red","green","blue"))
+```
+
+The complete methods suggest to divide the dataset in 4 clusters like we did before. \
+
+
+On the other hand, from the Ward one it is possible to identify 8 groups; we are going to explore this possibility. Below we allocate the observations in the 8 groups, print their size and plot theem into two dimensions.
+
+```{r echo=FALSE}
+groups_ward<-cutree(hc2,k=8) 
+
+table(groups_ward)
+```
+
+```{r echo=FALSE}
+clusplot(df, groups_ward, color=TRUE, shade=TRUE,
+         labels=2, lines=0, main= 'Customer segments')
+```
+
+From the plot we can see that there a lot of sovrappositions between the groups. \
+Next we are going to visualize the means of the vriables for each cluster.
+
+
+```{r echo=FALSE}
+clusterdata.mean<-function(data,groups){
+  aggregate(data,list(groups),function(x)mean(as.numeric(x)))
+}
+
+clusterdata.mean(df[, -1], groups_ward)
+```
+
+No clear distinctions can be made between the groups, because of their similarities. \
+
+\section{Silhoutte}
+
+Finally we are going to compare the model through the Silhoutte method, to check the consistency within clusters. 
+
+\subsection{K=4}
+
+```{r echo=FALSE}
+set.seed(27)
+kmeans4<-kmeans(df_num,4)
+kmeans8<-kmeans(df_num,8)
+
+```
+```{r echo=FALSE}
+ris4<-eclust(df_num,"kmeans",k=4) 
+
+fviz_silhouette(ris4)
+
+```
+
+As we can see from this last plot, with k=4 we just have only one misclassification in cluster 3.
+
+
+
+\subsection{K=8}
+
+```{r echo=FALSE}
+ris8<-eclust(df_num,"kmeans",k=8)
+
+fviz_silhouette(ris8)
+```
+
+On the other hand, with k=8 we have misclassifications in clusters 1, 3, 6 and 8.\
+In addition to that, the average silhoutte width is lower (0.23) compared to the one obtained with 4 clusters (0.27)
+
+
+\section{Conclusion}
+
+The K-Means algorithm applied at the beginnig of our analysis, combined with the elbow method to choose K, turned out to be the best one to find subgroups in our dataset. \
+
+The characteristics of the clusters we obtained allowed us to find subgroups based mainly on the style of playing of the athlets, that in the majority corresponds to the role they cover in the team, but in some other cases, like the example of Giroud, it refers to a more personal interpretation of their own role.\
+In other words, it can be that a forward can be in the cluster of actual forward, if he is protagonist of the actions and the final author of the goals, but also can be in the cluster of defenders, if he plays more for the team in building the actions.   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
